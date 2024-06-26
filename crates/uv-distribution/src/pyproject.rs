@@ -93,9 +93,35 @@ pub struct ToolUv {
     pub override_dependencies: Option<Vec<pep508_rs::Requirement<VerbatimParsedUrl>>>,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(untagged)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+pub enum ToolUvWorkspace {
+    Enabled(bool),
+    Definition(WorkspaceDefinition),
+}
+
+impl ToolUvWorkspace {
+    /// Returns `true` if workspaces are disabled for the project.
+    pub fn disabled(&self) -> bool {
+        match self {
+            ToolUvWorkspace::Enabled(enabled) => !enabled,
+            ToolUvWorkspace::Definition(_) => false,
+        }
+    }
+
+    /// Returns the [`WorkspaceDefinition`], if the project is a workspace root.
+    pub fn definition(&self) -> Option<&WorkspaceDefinition> {
+        match self {
+            ToolUvWorkspace::Definition(patterns) => Some(patterns),
+            ToolUvWorkspace::Enabled(_) => None,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
-pub struct ToolUvWorkspace {
+pub struct WorkspaceDefinition {
     pub members: Option<Vec<SerdePattern>>,
     pub exclude: Option<Vec<SerdePattern>>,
 }

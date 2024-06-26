@@ -1157,27 +1157,14 @@
       ]
     },
     "ToolUvWorkspace": {
-      "type": "object",
-      "properties": {
-        "exclude": {
-          "type": [
-            "array",
-            "null"
-          ],
-          "items": {
-            "$ref": "#/definitions/String"
-          }
+      "anyOf": [
+        {
+          "type": "boolean"
         },
-        "members": {
-          "type": [
-            "array",
-            "null"
-          ],
-          "items": {
-            "$ref": "#/definitions/String"
-          }
+        {
+          "$ref": "#/definitions/WorkspaceDefinition"
         }
-      }
+      ]
     },
     "ToolchainPreference": {
       "oneOf": [
@@ -1217,6 +1204,29 @@
           ]
         }
       ]
+    },
+    "WorkspaceDefinition": {
+      "type": "object",
+      "properties": {
+        "exclude": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/String"
+          }
+        },
+        "members": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/String"
+          }
+        }
+      }
     }
   }
 }

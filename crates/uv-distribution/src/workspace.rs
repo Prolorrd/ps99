@@ -13,7 +13,7 @@ use uv_fs::{absolutize_path, Simplified};
 use uv_normalize::PackageName;
 use uv_warnings::warn_user;
 
-use crate::pyproject::{Project, PyProjectToml, Source, ToolUvWorkspace};
+use crate::pyproject::{Project, PyProjectToml, Source, ToolUvWorkspace, WorkspaceDefinition};
 
 #[derive(thiserror::Error, Debug)]
 pub enum WorkspaceError {
@@ -24,6 +24,8 @@ pub enum WorkspaceError {
     MissingProject(PathBuf),
     #[error("No workspace found for: `{}`", _0.simplified_display())]
     MissingWorkspace(PathBuf),
+    #[error("The project is marked as a non-workspace: `{}`", _0.simplified_display())]
+    NonWorkspace(PathBuf),
     #[error("pyproject.toml section is declared as dynamic, but must be static: `{0}`")]
     DynamicNotAllowed(&'static str),
     #[error("Failed to find directories for glob: `{0}`")]
@@ -82,12 +84,29 @@ impl Workspace {
             .map_err(WorkspaceError::Normalize)?
             .to_path_buf();
 
+        // Check if the project is explicitly marked as a non-workspace.
+        if pyproject_toml
+            .tool
+            .as_ref()
+            .and_then(|tool| tool.uv.as_ref())
+            .and_then(|uv| uv.workspace.as_ref())
+            .map(ToolUvWorkspace::disabled)
+            .unwrap_or(false)
+        {
+            debug!(
+                "Project `{}` is marked as a non-workspace",
+                project_path.simplified_display()
+            );
+            return Err(WorkspaceError::NonWorkspace(project_path));
+        }
+
         // Check if the current project is also an explicit workspace root.
         let explicit_root = pyproject_toml
             .tool
             .as_ref()
             .and_then(|tool| tool.uv.as_ref())
             .and_then(|uv| uv.workspace.as_ref())
+            .and_then(|workspace| workspace.definition())
             .map(|workspace| {
                 (
                     project_path.clone(),
@@ -111,7 +130,7 @@ impl Workspace {
                 // Support implicit single project workspaces.
                 (
                     project_path.clone(),
-                    ToolUvWorkspace::default(),
+                    WorkspaceDefinition::default(),
                     pyproject_toml.clone(),
                 )
             };
@@ -248,7 +267,7 @@ impl Workspace {
     /// Collect the workspace member projects from the `members` and `excludes` entries.
     async fn collect_members(
         workspace_root: PathBuf,
-        workspace_definition: ToolUvWorkspace,
+        workspace_definition: WorkspaceDefinition,
         workspace_pyproject_toml: PyProjectToml,
         current_project: Option<WorkspaceMember>,
         stop_discovery_at: Option<&Path>,
@@ -324,6 +343,22 @@ impl Workspace {
                 let contents = fs_err::tokio::read_to_string(&pyproject_path).await?;
                 let pyproject_toml = PyProjectToml::from_string(contents)
                     .map_err(|err| WorkspaceError::Toml(pyproject_path, Box::new(err)))?;
+
+                // Check if the current project is explicitly marked as a non-workspace.
+                if pyproject_toml
+                    .tool
+                    .as_ref()
+                    .and_then(|tool| tool.uv.as_ref())
+                    .and_then(|uv| uv.workspace.as_ref())
+                    .map(ToolUvWorkspace::disabled)
+                    .unwrap_or(false)
+                {
+                    debug!(
+                        "Project `{}` is marked as a non-workspace; omitting from workspace members",
+                        pyproject_toml.project.as_ref().unwrap().name
+                    );
+                    continue;
+                }
 
                 // Extract the package name.
                 let Some(project) = pyproject_toml.project.clone() else {
@@ -585,12 +620,26 @@ impl ProjectWorkspace {
             .map_err(WorkspaceError::Normalize)?
             .to_path_buf();
 
+        // Check if workspaces are explicitly disabled for the project.
+        if project_pyproject_toml
+            .tool
+            .as_ref()
+            .and_then(|tool| tool.uv.as_ref())
+            .and_then(|uv| uv.workspace.as_ref())
+            .map(ToolUvWorkspace::disabled)
+            .unwrap_or(false)
+        {
+            debug!("Project `{}` is marked as a non-workspace", project.name);
+            return Err(WorkspaceError::NonWorkspace(project_path));
+        }
+
         // Check if the current project is also an explicit workspace root.
         let mut workspace = project_pyproject_toml
             .tool
             .as_ref()
             .and_then(|tool| tool.uv.as_ref())
             .and_then(|uv| uv.workspace.as_ref())
+            .and_then(|workspace| workspace.definition())
             .map(|workspace| {
                 (
                     project_path.clone(),
@@ -658,7 +707,7 @@ impl ProjectWorkspace {
 async fn find_workspace(
     project_root: &Path,
     stop_discovery_at: Option<&Path>,
-) -> Result<Option<(PathBuf, ToolUvWorkspace, PyProjectToml)>, WorkspaceError> {
+) -> Result<Option<(PathBuf, WorkspaceDefinition, PyProjectToml)>, WorkspaceError> {
     // Skip 1 to ignore the current project itself.
     for workspace_root in project_root
         .ancestors()
@@ -689,6 +738,7 @@ async fn find_workspace(
             .as_ref()
             .and_then(|tool| tool.uv.as_ref())
             .and_then(|uv| uv.workspace.as_ref())
+            .and_then(|workspace| workspace.definition())
         {
             if is_excluded_from_workspace(project_root, workspace_root, workspace)? {
                 debug!(
@@ -785,6 +835,7 @@ fn check_nested_workspaces(inner_workspace_root: &Path, stop_discovery_at: Optio
             .as_ref()
             .and_then(|tool| tool.uv.as_ref())
             .and_then(|uv| uv.workspace.as_ref())
+            .and_then(|workspace| workspace.definition())
         {
             let is_excluded = match is_excluded_from_workspace(
                 inner_workspace_root,
@@ -818,7 +869,7 @@ fn check_nested_workspaces(inner_workspace_root: &Path, stop_discovery_at: Optio
 fn is_excluded_from_workspace(
     project_path: &Path,
     workspace_root: &Path,
-    workspace: &ToolUvWorkspace,
+    workspace: &WorkspaceDefinition,
 ) -> Result<bool, WorkspaceError> {
     for exclude_glob in workspace.exclude.iter().flatten() {
         let absolute_glob = workspace_root

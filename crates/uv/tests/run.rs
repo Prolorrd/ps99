@@ -171,3 +171,34 @@ fn run_args() -> Result<()> {
 
     Ok(())
 }
+
+/// With `workspace = false`, we should avoid installing the project itself.
+#[test]
+fn run_workspace_false() -> Result<()> {
+    let context = TestContext::new("3.12");
+
+    let pyproject_toml = context.temp_dir.child("pyproject.toml");
+    pyproject_toml.write_str(indoc! { r#"
+        [project]
+        name = "foo"
+        version = "1.0.0"
+        requires-python = ">=3.8"
+        dependencies = ["anyio"]
+
+        [tool.uv]
+        workspace = false
+        "#
+    })?;
+
+    uv_snapshot!(context.filters(), context.run().arg("python").arg("--version"), @r###"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    Python 3.12.[X]
+
+    ----- stderr -----
+    warning: `uv run` is experimental and may change without warning.
+    "###);
+
+    Ok(())
+}
