@@ -161,7 +161,7 @@ pub(crate) async fn run(
                 );
             }
 
-            let venv = project::init_environment(
+            let venv = project::get_or_init_environment(
                 project.workspace(),
                 python.as_deref().map(ToolchainRequest::parse),
                 toolchain_preference,
